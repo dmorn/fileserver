@@ -10,7 +10,6 @@ import (
 
 var dir = flag.String("dir", ".", "path where the files to serve will be fetched")
 var port = flag.String("port", "8080", "server listening port")
-var help = flag.Bool("help", false, "show help for " + os.Args[0])
 
 func main() {
 	flag.Parse()
