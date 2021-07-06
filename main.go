@@ -1,37 +1,47 @@
 package main
 
 import (
+	"context"
 	"flag"
-	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"os"
+	"os/signal"
+	"syscall"
 )
 
 var dir = flag.String("dir", ".", "path where the files to serve will be fetched")
-var port = flag.String("port", "8080", "server listening port")
+var lnet = flag.String("lnet", "unix", "server listening network")
+var laddr = flag.String("laddr", "fs.sock", "server listening address (host:port) or socket file")
 
 func main() {
 	flag.Parse()
 
-	fs := http.Dir(*dir) // files in local directory
-	p := ":" + *port
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
-	log.Printf("%s listening on %s", os.Args[0], p)
-	if err := http.ListenAndServe(p, FileServer(fs)); err != nil {
-		fmt.Printf("%s stopping, reason: %v\n", os.Args[0], err)
+	ln, err := new(net.ListenConfig).Listen(ctx, *lnet, *laddr)
+	if err != nil {
+		log.Fatal(err)
 	}
-}
+	h := http.FileServer(http.Dir(*dir))
+	srv := http.Server{Handler: h}
 
-type fileHandler struct {
-	handler http.Handler
-}
+	sigch := make(chan os.Signal, 1)
+	signal.Notify(sigch, os.Interrupt, syscall.SIGTERM)
+	go func() {
+		log.Printf("**canceling** after signal: %v\n", <-sigch)
+		cancel()
+		srv.Close()
+	}()
 
-func FileServer(root http.FileSystem) http.Handler {
-	return &fileHandler{http.FileServer(root)}
-}
-
-func (f *fileHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	log.Printf("[%v] %v", r.Method, r.URL.Path)
-	f.handler.ServeHTTP(w, r)
+	log.Printf("server listening on %v://%v", *lnet, *laddr)
+	err = srv.Serve(ln)
+	if *lnet == "unix" {
+		os.Remove(*laddr)
+	}
+	if err != nil {
+		log.Fatal(err)
+	}
 }
